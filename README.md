@@ -24,6 +24,8 @@ Add `&debug` for a panel with live numbers, − / + buttons (they update the add
 | `catchAngle` | 8.5 | degrees: how close the cup must get to a drop |
 | `tiltToDrink` | 28 | degrees of sideways tilt that starts drinking |
 | `yearsPerCup` | 30 | years counted per cup |
+| `cupGrams` | 12 | weight of one paper cup in the readout |
+| `cupMl` | 240 | coffee in a full cup, ml (= grams) |
 
 Per-cup arrays (`stiffness`, `damping`, `sag`, `dropPitch`, `dropsPerCup`) are edited in the file.
 
@@ -46,6 +48,10 @@ Per-cup arrays (`stiffness`, `damping`, `sag`, `dropPitch`, `dropsPerCup`) are e
 ## v4 (2026-11-26): opening screen
 
 No title, text or button: a single cup floats, sways and turns slowly on brown, with a very soft light breathing around it (5 s cycle, `#halo` / `@keyframes breathe` in the CSS). A tap anywhere starts (iOS needs a tap to ask for motion and camera). If motion is refused, dragging the screen still works, silently.
+
+## v5 (2026-11-26): weight readout instead of the text
+
+The sentence box in the middle is gone. In its place: a big white number in grams / ml that rolls to its value and never quite settles, with a small red needle on its right pointing at the middle of the number, trembling more when you move (like a dial in a car). Weight = `cupGrams` x (your cup + every cup tied to you) + the coffee now in your cup. At the collapse it runs up fast. Only the action hints stay, small, under the dots (first catch, drink, throw).
 
 ## Not verified
 

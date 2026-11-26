@@ -19,7 +19,13 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;background:#20171
 .pill b{font-size:24px;font-weight:900;font-variant-numeric:tabular-nums}
 #pTime{right:12px}#pYears{left:12px}
 #bottom{position:fixed;left:16px;right:16px;top:calc(92px + env(safe-area-inset-top));display:none;flex-direction:column;align-items:center;gap:10px;pointer-events:none}
-#msg{background:rgba(40,20,12,.78);border-radius:20px;padding:12px 20px;font-size:19px;font-weight:600;text-align:center;line-height:1.35}
+#msg{background:rgba(40,20,12,.6);border-radius:16px;padding:7px 14px;font-size:15px;font-weight:600;text-align:center;line-height:1.35}
+#msg:empty{display:none}
+/* weight readout: a white rolling number, a small red needle on its right pointing at its middle */
+#gauge{display:flex;flex-direction:column;align-items:center;gap:2px;direction:ltr;color:#fff;text-shadow:0 2px 10px rgba(0,0,0,.55)}
+#gNum{position:relative;font-size:64px;font-weight:900;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-1px}
+#gUnit{font-size:14px;font-weight:700;opacity:.8}
+#needle{position:absolute;left:100%;top:50%;width:30px;height:16px;margin:-8px 0 0 12px;transform-origin:100% 50%;filter:drop-shadow(0 1px 3px rgba(0,0,0,.5))}
 #dots{display:flex;gap:8px;direction:ltr}
 .dot{width:18px;height:18px;border-radius:50%;border:2.5px solid var(--cream);background:rgba(40,20,12,.4)}
 .dot.on{background:#8a4a23;transform:scale(1.15)}
@@ -52,7 +58,7 @@ body.opening #halo{display:block}
 <div class="pill" id="pTime"><small>זמן שימוש</small><b id="vTime">0:00</b></div>
 <div class="pill" id="pYears"><small>שנות כוס אחריכם</small><b id="vYears">0</b></div>
 <svg id="arrow" viewBox="0 0 44 44"><path d="M40 22 12 6l6 16-6 16z" fill="#c4702c" stroke="#fff4e2" stroke-width="3" stroke-linejoin="round"/></svg>
-<div id="bottom"><div id="msg"></div><div id="dots"></div></div>
+<div id="bottom"><div id="gauge"><b id="gNum"><span id="gVal">0</span><svg id="needle" viewBox="0 0 30 16"><path d="M1 8 28 2.5v11z" fill="#e0262b"/><circle cx="27" cy="8" r="3" fill="#e0262b"/></svg></b><span id="gUnit">g / ml</span></div><div id="dots"></div><div id="msg"></div></div>
 <div id="big"></div>
 
 <div class="screen" id="intro" aria-label="התחלה"></div>
@@ -78,6 +84,8 @@ const TUNE={
   dropPitch:[[-8,10],[-12,16],[-5,24],[5,32],[12,38],[20,46],[28,50]],
   catchAngle:8.5,
   yearsPerCup:30,
+  cupGrams:12,     // weight of one paper cup, grams
+  cupMl:240,       // coffee in a full cup, ml (= grams)
   tiltToDrink:28,                    // degrees of sideways tilt that starts drinking (then it keeps pouring)
   grav:1.4,                          // how hard old cups sink under yours
   drag:1.6,                          // how thick the air is around them (higher = calmer, floatier)
@@ -294,7 +302,7 @@ function spawn(first){
 const dropDir=d=>dirOf(d.yaw+Math.sin(G.t*.7+d.phase)*.035,d.pitch+Math.sin(G.t*1.3+d.phase)*.03);
 function startCup(){
   G.state='catch';G.fill=0;G.got=0;G.pouring=false;dots();spawn(G.cup===0);
-  say(['הזיזו את הטלפון ותפסו את הקפה','כוס חדשה. קלה כמעט כמו קודם','משהו מושך אתכם למטה','הרימו גבוה יותר','היא לא נשארה "שם"','עוד קצת. למעלה','אתם מחזיקים את כולן'][level()]);
+  say(G.cup===0?'הזיזו את הטלפון ותפסו את הקפה':'');
 }
 function begin(){
   G.ghosts=[...G.ghosts,...G.newGhosts].slice(-60);G.newGhosts=[];relaxGhosts();
@@ -315,18 +323,18 @@ function toss(dx,dy){
   if(G.state!=='toss')return;
   const yaw=view.yaw+clamp(dx/innerWidth,-1,1)*1.2+rnd(-.15,.15),pitch=rnd(-24,6)*D;
   G.fly={from:mul(G.aim,3),to:mul(dirOf(yaw,pitch),rnd(2.8,3.4)),k:0};
-  G.state='flying';say('זהו. נזרקה.');tone(240,700,.35,'triangle',.15);
+  G.state='flying';say('');tone(240,700,.35,'triangle',.15);
 }
 function landed(){
   const at=G.fly.to,A=G.anchor||at,c=newBody(at,[rnd(-.7,.7),rnd(.25,1),rnd(-.7,.7)],{k:G.cup%3,face:dirOf(rnd(-3.1,3.1),0),
     rest:TUNE.rope+.3*(G.old.length%3),len:Math.max(TUNE.rope+.3*(G.old.length%3),Math.hypot(...sub(at,A)))});
   G.old.push(c);G.newGhosts.push({pos:ghostAt(mul(at,2.2)),up:c.up,k:c.k});saveGhosts();
   G.fly=null;G.cup++;G.thrown++;$('vYears').textContent=G.thrown*TUNE.yearsPerCup;
-  tone(130,40,.5,'sine',.5);buzz([60,40,90]);say('היא עדיין כאן.');G.state='landed';G.vel=[0,-.5,0];
+  tone(130,40,.5,'sine',.5);buzz([60,40,90]);say('');G.state='landed';G.vel=[0,-.5,0];
   setTimeout(()=>{if(G.state==='landed')startCup()},1700);
 }
 function collapse(){
-  G.state='collapse';G.drops=[];G.ct=0;say('כבדה מדי');$('dots').innerHTML='';
+  G.state='collapse';G.drops=[];G.ct=0;say('');$('dots').innerHTML='';
   G.thrown++;$('vYears').textContent=G.thrown*TUNE.yearsPerCup;tone(180,30,1.6,'sawtooth',.2);buzz([200,80,300]);
 }
 function finish(){
@@ -336,7 +344,17 @@ function finish(){
   setTimeout(()=>{$('end').style.display='flex'},3500);
 }
 
-function update(dt){
+/* grams carried: every cup you hold or drag along, plus the coffee now in your cup (1 ml = 1 g) */
+let gShown=0;
+function gauge(dt){
+  const target=TUNE.cupGrams*(G.old.length+1)+G.fill*TUNE.cupMl+(G.state==='collapse'?G.ct*400:0);
+  gShown+=(target-gShown)*Math.min(1,dt*3);
+  const settle=Math.abs(target-gShown)>.5?0:Math.sin(G.t*9)*.6; // a scale that never quite settles
+  $('gVal').textContent=Math.max(0,Math.round(gShown+settle));
+  const sp=Math.hypot(...G.vel), wob=Math.sin(G.t*13)*(1.5+sp*6)+Math.sin(G.t*2.1)*2;
+  $('needle').style.transform=`rotate(${wob.toFixed(1)}deg)`;
+}
+function update(dt){gauge(dt);
   G.t+=dt;const s=G.state,L=level();
   if(['catch','drink','toss','flying','landed'].includes(s)){G.time+=dt;$('vTime').textContent=`${Math.floor(G.time/60)}:${String(Math.floor(G.time%60)).padStart(2,'0')}`}
   // cup follows the hand: a heavy damped spring that also hangs
