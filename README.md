@@ -13,6 +13,12 @@ Add `&debug` for a panel with live numbers, − / + buttons (they update the add
 
 | knob | default | meaning |
 |---|---|---|
+| `back` | 0.6 | how far behind your cup the hanging bunch floats |
+| `under` | 3 | how strongly each old cup drifts back to its place under yours |
+| `grav` | 1.4 | how hard old cups sink |
+| `drag` | 1.6 | how thick the air is around them (higher = calmer, floatier) |
+| `rope` | 1 | size of the hanging bunch / rope length |
+| `tug` | 0.25 | how much the bunch pulls on your cup when you move |
 | `heavy` | 1 | multiplies how far each cup hangs below your aim (sag) |
 | `slow` | 1 | multiplies how slowly each cup follows the hand |
 | `catchAngle` | 8.5 | degrees: how close the cup must get to a drop |
@@ -28,6 +34,14 @@ Per-cup arrays (`stiffness`, `damping`, `sag`, `dropPitch`, `dropsPerCup`) are e
 - Screen-awake lock is requested again when you come back to the page.
 - Facilitator long-press (2.5 s on the end title clears cups from earlier games) no longer fires if the finger slides off.
 - Added URL tuning and the `?debug` panel.
+
+## v2 (2026-11-26): old cups hang under yours, every cup is solid
+
+- A thrown cup flies out, then its rope reels it back (~2 s) into a bunch that hangs lower than your cup, a little behind it, left and right. It floats (thick air, slow bob, slow tumble) but sinks, and it tugs on your cup when you move.
+- Hard rule: an old cup can never rise above the bottom of your cup. Measured on a scripted game: 0% of the time above (before the rule it was 24-37% when turning fast).
+- Every cup (yours, the hanging ones, the falling rain at the end, cups from earlier games) is a solid capsule; they push each other and can't enter one another. Worst overlap measured: about 1-3 cm on a 80 cm cup, for a fraction of a frame.
+- Cups from earlier games now stand farther out (6.5+) so they don't block the bunch.
+- Trade-off: because your cup sags lower every round, the bunch is visible on a portrait phone about half the time at cups 2-3 and mostly below the screen by cups 5-6 (you see the ropes pulling down). `back` didn't change that (tested 0.6 / 1.6 / 2.6).
 
 ## Not verified
 

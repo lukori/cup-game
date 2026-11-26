@@ -77,6 +77,12 @@ const TUNE={
   catchAngle:8.5,
   yearsPerCup:30,
   tiltToDrink:28,                    // degrees of sideways tilt that starts drinking (then it keeps pouring)
+  grav:1.4,                          // how hard old cups sink under yours
+  drag:1.6,                          // how thick the air is around them (higher = calmer, floatier)
+  rope:1.0,                          // rope length from your cup to the bunch
+  back:.6,                           // how far behind your cup the bunch floats (more = easier to see)
+  under:3,                          // how strongly each old cup returns to its place under yours
+  tug:.25,                           // how much the bunch pulls on your cup
   heavy:1,                           // x sag: 1.5 = cups hang 50% lower
   slow:1                             // x slowness: 1.5 = cups follow the hand 50% slower
 };
@@ -203,8 +209,77 @@ const buzz=ms=>navigator.vibrate&&navigator.vibrate(ms);
 
 /* ---------- game ---------- */
 const YEAR0=new Date().getFullYear();
-const G={state:'intro',cup:0,fill:0,got:0,old:[],ghosts:[],drops:[],splash:[],rain:[],time:0,t:0,aim:[0,0,-1],vel:[0,0,0],hold:false,fly:null,thrown:0};
+const G={state:'intro',cup:0,fill:0,got:0,old:[],ghosts:[],newGhosts:[],anchor:null,drops:[],splash:[],rain:[],time:0,t:0,aim:[0,0,-1],vel:[0,0,0],hold:false,fly:null,thrown:0};
 try{G.ghosts=(JSON.parse(localStorage.getItem('away-cups'))||[]).slice(-60)}catch(e){}
+/* ---------- bodies: every cup is a solid capsule; no cup can enter another ---------- */
+const CUP_R=.31,CUP_H=.2;                       // capsule radius and half-length along the cup axis (scale 1)
+const CAM={pos:[0,0,0],up:[0,1,0],r:1.1,h:0,inv:0};   // a bubble around the player so cups never fill the lens
+const capR=b=>b.r??CUP_R*(b.s||1), capH=b=>b.h??CUP_H*(b.s||1);
+function segClosest(p1,q1,p2,q2){
+  const d1=sub(q1,p1),d2=sub(q2,p2),r=sub(p1,p2),a=dot(d1,d1),e=dot(d2,d2),f=dot(d2,r);let s=0,t=0;
+  if(a<1e-9&&e<1e-9)return[p1,p2];
+  if(a<1e-9)t=clamp(f/e,0,1);
+  else{const c=dot(d1,r);if(e<1e-9)s=clamp(-c/a,0,1);
+    else{const b=dot(d1,d2),den=a*e-b*b;s=den>1e-9?clamp((b*f-c*e)/den,0,1):0;t=(b*s+f)/e;
+      if(t<0){t=0;s=clamp(-c/a,0,1)}else if(t>1){t=1;s=clamp((b-c)/a,0,1)}}}
+  return[add(p1,mul(d1,s)),add(p2,mul(d2,t))];
+}
+function separate(A,B){
+  const w=A.inv+B.inv;if(!w)return 0;
+  const ra=capR(A),rb=capR(B),ha=capH(A),hb=capH(B),dd=sub(A.pos,B.pos),lim=ra+rb+ha+hb;
+  if(dot(dd,dd)>lim*lim)return 0;
+  const[ca,cb]=segClosest(sub(A.pos,mul(A.up,ha)),add(A.pos,mul(A.up,ha)),sub(B.pos,mul(B.up,hb)),add(B.pos,mul(B.up,hb)));
+  let n=sub(ca,cb);const dist=Math.hypot(...n),pen=ra+rb-dist;if(pen<=0)return 0;
+  n=dist>1e-5?mul(n,1/dist):(Math.hypot(...dd)>1e-5?norm(dd):[0,1,0]);
+  if(A.inv){A.pos=add(A.pos,mul(n,pen*A.inv/w));A.spin=(A.spin||0)+pen*4}
+  if(B.inv){B.pos=sub(B.pos,mul(n,pen*B.inv/w));B.spin=(B.spin||0)+pen*4}
+  return pen;
+}
+function collideAll(list){
+  const cell=1.25,grid=new Map(),key=c=>c[0]+','+c[1]+','+c[2],cellOf=b=>b.pos.map(v=>Math.floor(v/cell));
+  list.forEach((b,i)=>{const k=key(cellOf(b));let g=grid.get(k);if(!g)grid.set(k,g=[]);g.push(i)});
+  list.forEach((A,i)=>{const c=cellOf(A);
+    for(let x=-1;x<=1;x++)for(let y=-1;y<=1;y++)for(let z=-1;z<=1;z++){const g=grid.get(key([c[0]+x,c[1]+y,c[2]+z]));if(g)for(const j of g)if(j>i)separate(A,list[j])}});
+}
+const GHOST_R=6.5;                              // cups from earlier games stand back, out of reach of the hanging bunch
+const ghostAt=p=>mul(norm(p),Math.max(GHOST_R,Math.hypot(...p)));
+function relaxGhosts(){G.ghosts.forEach(g=>{g.pos=ghostAt(g.pos);g.inv=1;g.s=.7});for(let i=0;i<30;i++)collideAll(G.ghosts);G.ghosts.forEach(g=>g.inv=0)}
+function saveGhosts(){try{localStorage.setItem('away-cups',JSON.stringify([...G.ghosts,...G.newGhosts].slice(-60).map(g=>({pos:g.pos,up:g.up,k:g.k}))))}catch(e){}}
+const newBody=(pos,up,o={})=>Object.assign({pos:pos.slice(),prev:pos.slice(),vel:[0,0,0],up:norm(up),axis:norm([rnd(-1,1),rnd(-1,1),rnd(-1,1)]),spin:.15,inv:1,phase:rnd(0,6)},o);
+// the cup in your hand, as a body (kinematic: it pushes, it is never pushed)
+function heldPose(){
+  if(!['catch','drink','toss','landed','collapse','years','end'].includes(G.state))return null;
+  const a=G.aim,[r,u]=frame(a),tip=G.state==='drink'&&(G.pouring||G.hold)?.55:0;
+  let up=norm(add(mul(u,Math.cos(.5+tip)),mul(a,-Math.sin(.5+tip))));
+  up=norm(add(up,mul(r,clamp(-dot(G.vel,r)*.35,-.5,.5))));          // sway against motion
+  return{pos:sub(mul(a,3),mul(up,.38)),up,inv:0,s:1};
+}
+function physics(dt){
+  const H=heldPose();if(H)G.anchor=sub(H.pos,mul(H.up,.45));
+  const A=G.anchor,live=[...G.old,...G.rain];
+  // each old cup has a place in a bunch hanging lower than your cup, a little behind it and to the sides (so you still see it)
+  if(A){let f=[G.aim[0],0,G.aim[2]];f=Math.hypot(...f)>1e-3?norm(f):[0,0,-1];const r=cross(f,[0,1,0]);
+    G.old.forEach((b,i)=>{const row=Math.floor(i/2),side=(i%2?1:-1)*(.42+.12*row)*TUNE.rope;
+      b.slot=add(A,add(add(mul(f,(TUNE.back+.45*row)*TUNE.rope),mul(r,side)),[0,-(.6+.22*row)*TUNE.rope,0]));b.rest=Math.hypot(...sub(b.slot,A))+.15})}
+  for(const b of G.old){b.prev=b.pos.slice();b.vel=mul(b.vel,Math.exp(-TUNE.drag*dt));
+    b.vel[1]+=(-1+Math.sin(G.t*.9+b.phase)*.6)*TUNE.grav*dt;                 // weighs, but floats
+    if(A&&b.len<=b.rest+.05)b.vel=add(b.vel,mul(sub(b.slot,b.pos),TUNE.under*dt));   // drifts back under your cup
+    b.pos=add(b.pos,mul(b.vel,dt));b.len=b.len>b.rest?Math.max(b.rest,b.len-dt*.9):b.rest}   // reel the thrown cup back
+  for(const r of G.rain){r.prev=r.pos.slice();r.vel[1]-=5*dt;r.pos=add(r.pos,mul(r.vel,dt))}
+  const bodies=[...G.old,...G.rain,...G.ghosts];if(H)bodies.push(H);
+  let pull=[0,0,0];
+  for(let it=0;it<3;it++){
+    if(A)for(const b of G.old){const d=sub(b.pos,A),l=Math.hypot(...d);if(l>b.len){const c=mul(d,(l-b.len)/l);b.pos=sub(b.pos,c);if(!it)pull=add(pull,c)}
+      if(b.len<=b.rest+.05&&b.pos[1]>A[1]-.4){const c=b.pos[1]-(A[1]-.4);b.pos[1]-=c}}   // never above your cup
+    collideAll(bodies);for(const b of live)separate(b,CAM);
+    for(const r of G.rain)if(r.pos[1]<r.floor){r.pos[1]=r.floor;if(!r.hit){r.hit=true;if(Math.random()<.3)tone(rnd(90,160),40,.15,'sine',.12)}}
+  }
+  for(const b of live){b.vel=mul(sub(b.pos,b.prev),1/dt);if(b.floor!=null&&b.pos[1]<=b.floor+1e-3){b.vel[0]*=.85;b.vel[2]*=.85}
+    b.spin=lerp(b.spin,.15,Math.min(1,dt*.8));b.up=norm(rotAxis(b.up,b.axis,b.spin*dt))}
+  // the bunch tugs the hand: what the rope holds back, your cup feels
+  if(H&&['catch','drink','toss','landed'].includes(G.state))G.vel=add(G.vel,mul(pull,TUNE.tug/(3*dt)));
+}
+relaxGhosts();
 const level=()=>Math.min(G.cup,TUNE.stiffness.length-1);
 const need=()=>TUNE.dropsPerCup[level()];
 function say(t){$('msg').innerHTML=t}
@@ -220,7 +295,8 @@ function startCup(){
   say(['הזיזו את הטלפון ותפסו את הקפה','כוס חדשה. קלה כמעט כמו קודם','משהו מושך אתכם למטה','הרימו גבוה יותר','היא לא נשארה "שם"','עוד קצת. למעלה','אתם מחזיקים את כולן'][level()]);
 }
 function begin(){
-  Object.assign(G,{cup:0,old:[],rain:[],splash:[],time:0,thrown:0,fly:null,aim:view.F.slice(),vel:[0,0,0]});
+  G.ghosts=[...G.ghosts,...G.newGhosts].slice(-60);G.newGhosts=[];relaxGhosts();
+  Object.assign(G,{cup:0,old:[],anchor:null,rain:[],splash:[],time:0,thrown:0,fly:null,aim:view.F.slice(),vel:[0,0,0]});
   ['pTime','pYears'].forEach(i=>$(i).style.display='block');$('bottom').style.display='flex';
   $('intro').style.display=$('end').style.display=$('big').style.display='none';
   $('tint').style.opacity=0;$('cam').style.filter='';$('vYears').textContent=0;startCup();
@@ -240,9 +316,9 @@ function toss(dx,dy){
   G.state='flying';say('זהו. נזרקה.');tone(240,700,.35,'triangle',.15);
 }
 function landed(){
-  const c={pos:G.fly.to,up:norm([rnd(-.7,.7),rnd(.25,1),rnd(-.7,.7)]),phase:rnd(0,6),k:G.cup%3,face:dirOf(rnd(-3.1,3.1),0)};
-  G.old.push(c);G.ghosts.push({pos:mul(c.pos,1.5),up:c.up,k:c.k});G.ghosts=G.ghosts.slice(-60);
-  try{localStorage.setItem('away-cups',JSON.stringify(G.ghosts))}catch(e){}
+  const at=G.fly.to,A=G.anchor||at,c=newBody(at,[rnd(-.7,.7),rnd(.25,1),rnd(-.7,.7)],{k:G.cup%3,face:dirOf(rnd(-3.1,3.1),0),
+    rest:TUNE.rope+.3*(G.old.length%3),len:Math.max(TUNE.rope+.3*(G.old.length%3),Math.hypot(...sub(at,A)))});
+  G.old.push(c);G.newGhosts.push({pos:ghostAt(mul(at,2.2)),up:c.up,k:c.k});saveGhosts();
   G.fly=null;G.cup++;G.thrown++;$('vYears').textContent=G.thrown*TUNE.yearsPerCup;
   tone(130,40,.5,'sine',.5);buzz([60,40,90]);say('היא עדיין כאן.');G.state='landed';G.vel=[0,-.5,0];
   setTimeout(()=>{if(G.state==='landed')startCup()},1700);
@@ -278,10 +354,10 @@ function update(dt){
     const year=Math.round(YEAR0+TUNE.yearsPerCup*Math.pow(k,1.3));
     $('big').textContent=G.ct<14?year:'????';
     if(G.rain.length<Math.min(170,G.ct*13)){const yaw=rnd(-Math.PI,Math.PI),rad=rnd(2.6,7),floor=rnd(-3.2,-1.1)+Math.max(0,G.ct-5)*.07;
-      G.rain.push({pos:[Math.sin(yaw)*rad,rnd(3,6),-Math.cos(yaw)*rad],floor,vy:0,up:norm([rnd(-1,1),rnd(-.4,1),rnd(-1,1)])})}
+      G.rain.push(newBody([Math.sin(yaw)*rad,rnd(3,6),-Math.cos(yaw)*rad],[rnd(-1,1),rnd(-.4,1),rnd(-1,1)],{floor,s:.9,k:G.rain.length%3}))}
     if(G.ct>17)finish();
   }
-  for(const r of G.rain)if(r.pos[1]>r.floor){r.vy-=5*dt;r.pos[1]=Math.max(r.floor,r.pos[1]+r.vy*dt);if(r.pos[1]===r.floor&&Math.random()<.3)tone(rnd(90,160),40,.15,'sine',.12)}
+  physics(dt);
   for(const p of G.splash){p.v[1]-=4*dt;p.p=add(p.p,mul(p.v,dt));p.life-=dt*1.8}
   G.splash=G.splash.filter(p=>p.life>0);
   if(drone&&ac){const on=s!=='intro';drone.g.gain.setTargetAtTime(on?Math.min(.16,G.thrown*.022):0,ac.currentTime,.4);drone.o.frequency.setTargetAtTime(70-G.thrown*5,ac.currentTime,.5)}
@@ -299,20 +375,17 @@ function render(){
   gl.uniformMatrix4fv(loc.V,false,[R[0],U[0],-F[0],0,R[1],U[1],-F[1],0,R[2],U[2],-F[2],0,0,0,0,1]);
   gl.disable(gl.BLEND);
   const s=G.state;
-  for(const c of G.ghosts.slice(0,G.ghosts.length-G.old.length))drawCup(c.pos,c.up,0,{mesh:USED[c.k||0],s:.7,dirt:.8});
-  G.old.forEach((c,i)=>drawCup(add(c.pos,[0,Math.sin(G.t*.8+c.phase)*.04,0]),c.up,0,{mesh:USED[c.k],face:c.face,dirt:s==='years'||s==='end'?.8:Math.min(.6,(G.old.length-i-1)*.13)}));
-  G.rain.forEach((r,i)=>drawCup(r.pos,r.up,0,{mesh:USED[i%3],dirt:.55,s:.9}));
+  for(const c of G.ghosts)drawCup(c.pos,c.up,0,{mesh:USED[c.k||0],s:.7,dirt:.8});
+  G.old.forEach((c,i)=>drawCup(c.pos,c.up,0,{mesh:USED[c.k],face:c.face,dirt:s==='years'||s==='end'?.8:Math.min(.6,(G.old.length-i-1)*.13)}));
+  G.rain.forEach(r=>drawCup(r.pos,r.up,0,{mesh:USED[r.k],dirt:.55,s:.9}));
   let cupPos=null;
   if(['catch','drink','toss','landed','collapse','years','end'].includes(s)){
-    const a=G.aim,[r,u]=frame(a),tip=s==='drink'&&(G.pouring||G.hold)?.55:0;
-    let up=norm(add(mul(u,Math.cos(.5+tip)),mul(a,-Math.sin(.5+tip))));
-    up=norm(add(up,mul(r,clamp(-dot(G.vel,r)*.35,-.5,.5))));          // sway against motion
-    cupPos=sub(mul(a,3),mul(up,.38));
-    drawCup(cupPos,up,G.fill,{face:mul(a,-1)});
+    const H=heldPose();cupPos=H.pos;drawCup(H.pos,H.up,G.fill,{face:mul(G.aim,-1)});
   }
   if(s==='flying'){const k=G.fly.k,p=add(add(mul(G.fly.from,1-k),mul(G.fly.to,k)),[0,Math.sin(k*Math.PI)*1.1,0]);cupPos=p;drawCup(p,[Math.sin(k*9),Math.cos(k*9),.3],0,{face:mul(view.F,-1)})}
   // tethers: every old cup stays tied to the one in your hand
-  if(cupPos)for(const c of G.old){const A=c.pos,B=add(cupPos,[0,-.3,0]),mid=add(mul(add(A,B),.5),[0,-.55,0]);let prev=A;
+  const tied=s==='flying'?[...G.old,{pos:cupPos,len:9}]:G.old;
+  if(G.anchor)for(const c of tied){const A=c.pos,B=G.anchor,slack=Math.max(.04,(c.len||1)-Math.hypot(...sub(A,B))),mid=add(mul(add(A,B),.5),[0,-Math.min(.6,slack*.6),0]);let prev=A;
     for(let i=1;i<=14;i++){const k=i/14,p=add(add(mul(A,(1-k)*(1-k)),mul(mid,2*k*(1-k))),mul(B,k*k)),d=sub(p,prev),[rr,uu]=frame(norm(d));draw(MESH.rope,prev,rr,d,uu,.012,1,.012,DARK,{gloss:.2});prev=p}}
   for(const p of G.splash)draw(MESH.ball,p.p,[1,0,0],[0,1,0],[0,0,1],.035*p.life,.035*p.life,.035*p.life,DROP,{gloss:1});
   for(const d of G.drops){const p=mul(dropDir(d),3.7),k=Math.min(1,(G.t-d.born)*3),w=1+Math.sin(G.t*6+d.phase)*.06;
@@ -355,11 +428,11 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 $('again').onclick=()=>{audioInit();begin()};
 // long press on the end title clears the cups left from earlier games (for the facilitator)
 let lp;const h=$('end').querySelector('h1');
-h.addEventListener('pointerdown',()=>lp=setTimeout(()=>{G.ghosts=[];G.old=[];G.rain=[];try{localStorage.removeItem('away-cups')}catch(e){}h.style.opacity=.4},2500));
+h.addEventListener('pointerdown',()=>lp=setTimeout(()=>{G.ghosts=[];G.newGhosts=[];G.old=[];G.rain=[];try{localStorage.removeItem('away-cups')}catch(e){}h.style.opacity=.4},2500));
 ['pointerup','pointerleave','pointercancel'].forEach(ev=>h.addEventListener(ev,()=>clearTimeout(lp)));
 /* ---------- ?debug: live numbers, +/- per knob (updates the address so the link can be copied), copy log ---------- */
 if(URLP.has('debug')){
-  const KN={heavy:[.1,0,3],slow:[.1,.3,3],catchAngle:[.5,3,20],tiltToDrink:[2,10,60],yearsPerCup:[5,5,500]};
+  const KN={back:[.2,0,4],under:[.5,0,15],grav:[.2,0,6],drag:[.2,0,6],rope:[.1,.4,3],tug:[.05,0,1.5],heavy:[.1,0,3],slow:[.1,.3,3],catchAngle:[.5,3,20],tiltToDrink:[2,10,60],yearsPerCup:[5,5,500]};
   const box=document.createElement('div');
   box.style.cssText='position:fixed;left:8px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:9;background:rgba(0,0,0,.72);color:#fff;font:12px/1.35 ui-monospace,monospace;padding:8px;border-radius:10px;direction:ltr;text-align:left;max-width:calc(100% - 16px)';
   const live=document.createElement('div');box.appendChild(live);
