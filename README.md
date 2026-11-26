@@ -43,6 +43,10 @@ Per-cup arrays (`stiffness`, `damping`, `sag`, `dropPitch`, `dropsPerCup`) are e
 - Cups from earlier games now stand farther out (6.5+) so they don't block the bunch.
 - Trade-off: because your cup sags lower every round, the bunch is visible on a portrait phone about half the time at cups 2-3 and mostly below the screen by cups 5-6 (you see the ropes pulling down). `back` didn't change that (tested 0.6 / 1.6 / 2.6).
 
+## v4 (2026-11-26): opening screen
+
+No title, text or button: a single cup floats, sways and turns slowly on brown, with a very soft light breathing around it (5 s cycle, `#halo` / `@keyframes breathe` in the CSS). A tap anywhere starts (iOS needs a tap to ask for motion and camera). If motion is refused, dragging the screen still works, silently.
+
 ## Not verified
 
 Real phone (iOS Safari motion permission, camera, auto-rotate while tilting). Tested only by a scripted full playthrough in a desktop browser.
