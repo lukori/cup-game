@@ -26,6 +26,7 @@ Add `&debug` for a panel with live numbers, − / + buttons (they update the add
 | `yearsPerCup` | 30 | years counted per cup |
 | `cupGrams` | 12 | weight of one paper cup in the readout |
 | `cupMl` | 240 | coffee in a full cup, ml (= grams) |
+| `oldAlpha` | 0.85 | how solid the tied (grey) cups are |
 
 Per-cup arrays (`stiffness`, `damping`, `sag`, `dropPitch`, `dropsPerCup`) are edited in the file.
 
@@ -52,6 +53,14 @@ No title, text or button: a single cup floats, sways and turns slowly on brown, 
 ## v5 (2026-11-26): weight readout instead of the text
 
 The sentence box in the middle is gone. In its place: a big white number in grams / ml that rolls to its value and never quite settles, with a small red needle on its right pointing at the middle of the number, trembling more when you move (like a dial in a car). Weight = `cupGrams` x (your cup + every cup tied to you) + the coffee now in your cup. At the collapse it runs up fast. Only the action hints stay, small, under the dots (first catch, drink, throw).
+
+## v6 (2026-11-26): from casual to quieter / indie
+
+Anchor before this: `checkpoint-v5-weight-gauge` (to go back: restore index.html from that tag).
+- Tied cups are greyscale and 85% opaque (`oldAlpha`), drawn last, far to near, so the world shows through them. Cups from earlier games are grey too. Ropes are thinner and grey.
+- Type: Rubik (round, heavy) replaced by IBM Plex Sans Hebrew (light) for words and IBM Plex Mono (thin) for every number: weight, time, years, the running year.
+- HUD without boxes: small labels and numbers in the corners, 6 px ring dots, thin red needle, a thin chevron instead of the orange arrow, hints as one small line.
+- End screen: small light title, outlined square button instead of the orange pill.
 
 ## Not verified
 
